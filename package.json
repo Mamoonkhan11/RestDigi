@@ -14,11 +14,12 @@
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
     "@supabase/supabase-js": "^2.105.1",
+    "axios": "^1.8.1",
     "framer-motion": "^12.38.0",
     "html2canvas": "^1.4.1",
-    "jimp": "^1.6.1",
+    "jimp": "^0.22.12",
     "lucide-react": "^1.14.0",
-    "next": "14.2.3",
+    "next": "^14.2.35",
     "qrcode.react": "^4.2.0",
     "razorpay": "^2.9.6",
     "react": "^18",
@@ -43,5 +44,8 @@
     "postcss": "^8.5.13",
     "tailwindcss": "^3.4.19",
     "typescript": "^5"
+  },
+  "overrides": {
+    "follow-redirects": "^1.16.2"
   }
 }
