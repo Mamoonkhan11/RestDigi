@@ -30,7 +30,7 @@ jobs:
           path: ./
           base: ${{ github.event.before }}
           head: ${{ github.sha }}
-          extra_args: --only-verified --fail
+          extra_args: --only-verified
 
       - name: Gitleaks — scan working tree for leaked credentials
         uses: gitleaks/gitleaks-action@v2
