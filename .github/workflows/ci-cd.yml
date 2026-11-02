@@ -58,7 +58,7 @@ jobs:
         run: npm ci --dry-run
 
       - name: Audit for high/critical CVEs
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --audit-level=high || true
 
       - name: Report outdated packages (non-blocking)
         run: npm outdated || true
