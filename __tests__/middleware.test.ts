@@ -8,7 +8,11 @@ function makeRequest(pathname: string): NextRequest {
   return new NextRequest(new URL(`http://localhost${pathname}`));
 }
 
+<<<<<<< HEAD
 describe('middleware — real Supabase & Next.js request testing', () => {
+=======
+describe('middleware — Supabase & Next.js request testing', () => {
+>>>>>>> automation
   const originalFetch = global.fetch;
 
   afterEach(() => {
