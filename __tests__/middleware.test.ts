@@ -1,3 +1,6 @@
+/**
+ * @jest-environment node
+ */
 // Mock @supabase/supabase-js
 jest.mock('@supabase/supabase-js', () => {
   const single = jest.fn();
