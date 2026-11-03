@@ -18,7 +18,7 @@ export async function middleware(request: NextRequest) {
 
   const slug = match[1];
   // Skip demo restaurant slug if needed
-  if (!slug || slug === 'restdigi' || slug === 'demo-restaurant') {
+  if (!slug || slug === 'restdigi' || slug === 'demo-restaurant' || slug === 'the-backyard-grill') {
     return NextResponse.next();
   }
 

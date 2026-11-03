@@ -1,180 +1,241 @@
 /**
  * @jest-environment node
  */
-// Mock @supabase/supabase-js
-jest.mock('@supabase/supabase-js', () => {
-  const single = jest.fn();
-  const eq = jest.fn(() => ({ single }));
-  const select = jest.fn(() => ({ eq }));
-  const updateEq = jest.fn().mockResolvedValue({ error: null });
-  const update = jest.fn(() => ({ eq: updateEq }));
-  const from = jest.fn(() => ({ select, update }));
-
-  return {
-    createClient: jest.fn(() => ({ from })),
-    // Expose inner mocks so tests can reconfigure them
-    __mocks: { single, eq, select, update, from },
-  };
-});
-
-// ─── Import middleware AFTER the mock is registered ───────────────────────────
 import { middleware } from '@/middleware';
 import { NextRequest } from 'next/server';
-
-// Grab the inner mock functions exposed by the factory
-const { __mocks } = jest.requireMock('@supabase/supabase-js') as {
-  __mocks: {
-    single: jest.Mock;
-    eq: jest.Mock;
-    select: jest.Mock;
-    update: jest.Mock;
-    from: jest.Mock;
-  };
-};
-
-// ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function makeRequest(pathname: string): NextRequest {
   return new NextRequest(new URL(`http://localhost${pathname}`));
 }
 
-/** Configures the Supabase mock to return a specific restaurant row */
-function setRestaurantResult(data: object | null, error: object | null = null) {
-  __mocks.single.mockResolvedValue({ data, error });
-}
+describe('middleware — real Supabase & Next.js request testing', () => {
+  const originalFetch = global.fetch;
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Route filtering — non-menu routes bypass all DB checks
-// ══════════════════════════════════════════════════════════════════════════════
-describe('middleware — route filtering', () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  it('passes through /admin without hitting Supabase', async () => {
-    const res = await middleware(makeRequest('/admin'));
-    expect(res.status).toBe(200);
-    expect(__mocks.from).not.toHaveBeenCalled();
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
   });
 
-  it('passes through /login without hitting Supabase', async () => {
-    const res = await middleware(makeRequest('/login'));
-    expect(res.status).toBe(200);
-    expect(__mocks.from).not.toHaveBeenCalled();
-  });
+  // ════════════════════════════════════════════════════════════════════════════
+  // 1. Route Filtering (No database interaction)
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('route filtering — non-menu routes bypass database checks', () => {
+    it('passes through /admin without hitting Supabase', async () => {
+      const fetchSpy = jest.fn();
+      global.fetch = fetchSpy as any;
 
-  it('passes through bare /menu path (no slug) without hitting Supabase', async () => {
-    const res = await middleware(makeRequest('/menu'));
-    expect(res.status).toBe(200);
-    expect(__mocks.from).not.toHaveBeenCalled();
-  });
-});
+      const res = await middleware(makeRequest('/admin'));
+      expect(res.status).toBe(200);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Reserved slugs — skip DB check entirely
-// ══════════════════════════════════════════════════════════════════════════════
-describe('middleware — reserved slugs', () => {
-  beforeEach(() => jest.clearAllMocks());
+    it('passes through /login without hitting Supabase', async () => {
+      const fetchSpy = jest.fn();
+      global.fetch = fetchSpy as any;
 
-  it('passes through /menu/restdigi without any DB check', async () => {
-    const res = await middleware(makeRequest('/menu/restdigi'));
-    expect(__mocks.from).not.toHaveBeenCalled();
-    expect(res.status).toBe(200);
-  });
+      const res = await middleware(makeRequest('/login'));
+      expect(res.status).toBe(200);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
 
-  it('passes through /menu/demo-restaurant without any DB check', async () => {
-    const res = await middleware(makeRequest('/menu/demo-restaurant'));
-    expect(__mocks.from).not.toHaveBeenCalled();
-    expect(res.status).toBe(200);
-  });
-});
+    it('passes through root / without hitting Supabase', async () => {
+      const fetchSpy = jest.fn();
+      global.fetch = fetchSpy as any;
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Active subscription — request should pass through
-// ══════════════════════════════════════════════════════════════════════════════
-describe('middleware — active subscription', () => {
-  const futureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const res = await middleware(makeRequest('/'));
+      expect(res.status).toBe(200);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
 
-  beforeEach(() => {
-    jest.clearAllMocks();
-    setRestaurantResult({
-      id: 'rest-1',
-      expiry_date: futureDate,
-      subscription_status: 'active',
+    it('passes through bare /menu (no slug) without hitting Supabase', async () => {
+      const fetchSpy = jest.fn();
+      global.fetch = fetchSpy as any;
+
+      const res = await middleware(makeRequest('/menu'));
+      expect(res.status).toBe(200);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('passes through nested /menu/:slug/dish without intercepting', async () => {
+      const fetchSpy = jest.fn();
+      global.fetch = fetchSpy as any;
+
+      const res = await middleware(makeRequest('/menu/pizza-palace/dish/123'));
+      expect(res.status).toBe(200);
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
   });
 
-  it('passes the request through (returns NextResponse.next)', async () => {
-    const res = await middleware(makeRequest('/menu/golden-spoon'));
-    expect(res.status).toBe(200);
-  });
+  // ════════════════════════════════════════════════════════════════════════════
+  // 2. Reserved Slugs (Immediate pass-through)
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('reserved slugs — instant pass-through for demo & platform routes', () => {
+    it('allows /menu/restdigi without querying Supabase', async () => {
+      const fetchSpy = jest.fn();
+      global.fetch = fetchSpy as any;
 
-  it('does NOT serve an HTML maintenance page for an active subscription', async () => {
-    const res = await middleware(makeRequest('/menu/golden-spoon'));
-    const body = await res.text();
-    expect(body).not.toMatch(/<html/i);
-  });
-});
+      const res = await middleware(makeRequest('/menu/restdigi'));
+      expect(res.status).toBe(200);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Expired subscription — should block with HTML maintenance page
-// ══════════════════════════════════════════════════════════════════════════════
-describe('middleware — expired subscription', () => {
-  const pastDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(); // 5 days ago
+    it('allows /menu/demo-restaurant without querying Supabase', async () => {
+      const fetchSpy = jest.fn();
+      global.fetch = fetchSpy as any;
 
-  beforeEach(() => {
-    jest.clearAllMocks();
-    setRestaurantResult({
-      id: 'rest-expired',
-      expiry_date: pastDate,
-      subscription_status: 'inactive',
+      const res = await middleware(makeRequest('/menu/demo-restaurant'));
+      expect(res.status).toBe(200);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('allows /menu/the-backyard-grill (landing page demo menu) without querying Supabase', async () => {
+      const fetchSpy = jest.fn();
+      global.fetch = fetchSpy as any;
+
+      const res = await middleware(makeRequest('/menu/the-backyard-grill'));
+      expect(res.status).toBe(200);
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
   });
 
-  it('returns an HTML response for an expired inactive restaurant', async () => {
-    const res = await middleware(makeRequest('/menu/expired-cafe'));
-    const contentType = res.headers.get('content-type') ?? '';
-    expect(contentType).toContain('text/html');
+  // ════════════════════════════════════════════════════════════════════════════
+  // 3. Active Subscription Flow (Real Supabase query & pass-through)
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('active subscriptions — passes through to menu UI', () => {
+    it('queries Supabase with proper PostgREST parameters and returns 200 pass-through', async () => {
+      const futureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      let requestedUrl = '';
+
+      global.fetch = (async (url: string | URL | Request) => {
+        requestedUrl = url.toString();
+        return new Response(
+          JSON.stringify({
+            id: 'rest-active-uuid',
+            expiry_date: futureDate,
+            subscription_status: 'active',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }) as any;
+
+      const res = await middleware(makeRequest('/menu/golden-spoon'));
+      expect(res.status).toBe(200);
+
+      // Verify real Supabase PostgREST query structure
+      expect(requestedUrl).toContain('/rest/v1/restaurants');
+      expect(requestedUrl).toContain('slug=eq.golden-spoon');
+      expect(requestedUrl).toContain('select=id%2Cexpiry_date%2Csubscription_status');
+
+      // Verify no HTML maintenance body is returned
+      const body = await res.text();
+      expect(body).not.toMatch(/<html/i);
+    });
   });
 
-  it('includes a maintenance message in the HTML body', async () => {
-    const res = await middleware(makeRequest('/menu/expired-cafe'));
-    const html = await res.text();
-    expect(html).toMatch(/maintenance|manual|subscription/i);
+  // ════════════════════════════════════════════════════════════════════════════
+  // 4. Expired Subscription Flow (Blocks UI & Displays Maintenance Card)
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('expired subscriptions — blocks access and renders maintenance page', () => {
+    const pastDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+
+    it('returns styled HTML maintenance page for expired inactive restaurant', async () => {
+      global.fetch = (async () => {
+        return new Response(
+          JSON.stringify({
+            id: 'rest-expired-1',
+            expiry_date: pastDate,
+            subscription_status: 'inactive',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }) as any;
+
+      const res = await middleware(makeRequest('/menu/expired-bistro'));
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/html');
+
+      const html = await res.text();
+      expect(html).toContain('RestDigi Digital Menu Maintenance');
+      expect(html).toContain('Please inform your waiter to take your order manually.');
+      expect(html).toContain('<!DOCTYPE html>');
+    });
+
+    it('automatically transitions active-but-expired restaurant to inactive in DB', async () => {
+      let patchCalled = false;
+      let patchBody = '';
+
+      global.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = url.toString();
+        if (init?.method === 'PATCH') {
+          patchCalled = true;
+          patchBody = String(init.body);
+          return new Response(null, { status: 204 });
+        }
+
+        // Initial GET query returns expired date with active status
+        return new Response(
+          JSON.stringify({
+            id: 'rest-expiring-2',
+            expiry_date: pastDate,
+            subscription_status: 'active',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }) as any;
+
+      const res = await middleware(makeRequest('/menu/expired-auto-update'));
+      expect(patchCalled).toBe(true);
+      expect(patchBody).toContain('"subscription_status":"inactive"');
+      expect(res.headers.get('content-type')).toContain('text/html');
+    });
   });
 
-  it('returns HTTP 200 (not a redirect) for the maintenance page', async () => {
-    const res = await middleware(makeRequest('/menu/expired-cafe'));
-    expect(res.status).toBe(200);
-  });
-});
+  // ════════════════════════════════════════════════════════════════════════════
+  // 5. Non-Existent Restaurant (PostgREST PGRST116 0 rows)
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('non-existent restaurant slug', () => {
+    it('gracefully passes through when Supabase returns 0 rows (PGRST116)', async () => {
+      global.fetch = (async () => {
+        return new Response(
+          JSON.stringify({
+            code: 'PGRST116',
+            details: 'The result contains 0 rows',
+            message: 'JSON object requested, multiple (or no) rows returned',
+          }),
+          { status: 406, headers: { 'content-type': 'application/json' } }
+        );
+      }) as any;
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Restaurant not found
-// ══════════════════════════════════════════════════════════════════════════════
-describe('middleware — restaurant not found', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    setRestaurantResult(null);
-  });
-
-  it('passes through when the slug has no matching restaurant in DB', async () => {
-    const res = await middleware(makeRequest('/menu/unknown-slug'));
-    const contentType = res.headers.get('content-type') ?? '';
-    expect(res.status).toBe(200);
-    expect(contentType).not.toContain('text/html');
-  });
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Supabase error — fail-open (do not block the user on DB errors)
-// ══════════════════════════════════════════════════════════════════════════════
-describe('middleware — Supabase error handling', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    __mocks.single.mockRejectedValue(new Error('Network timeout'));
+      const res = await middleware(makeRequest('/menu/non-existent-cafe-999'));
+      expect(res.status).toBe(200);
+      const contentType = res.headers.get('content-type') ?? '';
+      expect(contentType).not.toContain('text/html');
+    });
   });
 
-  it('passes the request through when Supabase throws (fail-open)', async () => {
-    const res = await middleware(makeRequest('/menu/some-restaurant'));
-    expect(res.status).toBe(200);
+  // ════════════════════════════════════════════════════════════════════════════
+  // 6. Fail-Open Database Resilience
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('database resilience — fail-open strategy', () => {
+    it('passes through when Supabase returns a database error', async () => {
+      global.fetch = (async () => {
+        return new Response(
+          JSON.stringify({ code: '42P01', message: 'relation "restaurants" does not exist' }),
+          { status: 500, headers: { 'content-type': 'application/json' } }
+        );
+      }) as any;
+
+      const res = await middleware(makeRequest('/menu/golden-spoon'));
+      expect(res.status).toBe(200);
+    });
+
+    it('passes through when Supabase returns an HTTP 500 internal server error', async () => {
+      global.fetch = (async () => {
+        return new Response('Internal Server Error', { status: 500 });
+      }) as any;
+
+      const res = await middleware(makeRequest('/menu/golden-spoon'));
+      expect(res.status).toBe(200);
+    });
   });
 });
