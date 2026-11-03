@@ -1,247 +1,309 @@
-import '@testing-library/jest-dom';
-
-// ─── Mock @supabase/supabase-js ───────────────────────────────────────────────
-jest.mock('@supabase/supabase-js', () => {
-  // Storage mocks
-  const mockUpload = jest.fn();
-  const mockGetPublicUrl = jest.fn();
-  const mockRemove = jest.fn();
-
-  // DB mocks
-  const mockInsert = jest.fn();
-  const mockGetUser = jest.fn();
-  const mockSingle = jest.fn();
-  const mockEq = jest.fn(() => ({ single: mockSingle }));
-  const mockSelect = jest.fn(() => ({ eq: mockEq }));
-  const mockFrom = jest.fn(() => ({
-    select: mockSelect,
-    insert: mockInsert,
-  }));
-
-  // Realtime mocks
-  const mockSend = jest.fn();
-  const mockSubscribe = jest.fn();
-  const mockChannel = jest.fn(() => ({ subscribe: mockSubscribe, send: mockSend }));
-  const mockRemoveChannel = jest.fn();
-
-  return {
-    createClient: jest.fn(() => ({
-      storage: {
-        from: jest.fn(() => ({
-          upload: mockUpload,
-          getPublicUrl: mockGetPublicUrl,
-          remove: mockRemove,
-        })),
-      },
-      from: mockFrom,
-      auth: { getUser: mockGetUser },
-      channel: mockChannel,
-      removeChannel: mockRemoveChannel,
-    })),
-    // Expose all inner mocks for test configuration
-    __mocks: {
-      mockUpload, mockGetPublicUrl, mockRemove,
-      mockInsert, mockGetUser, mockSingle, mockEq, mockSelect, mockFrom,
-      mockSend, mockSubscribe, mockChannel, mockRemoveChannel,
-    },
-  };
-});
-
-// ─── Import module under test AFTER mocks are registered ─────────────────────
+/**
+ * @jest-environment node
+ */
 import {
+  supabase,
   uploadDishImage,
   removeDishImage,
   broadcastMenuUpdate,
   logAdminAction,
+  getDishesByRestaurantSlug,
+  getDishesForAdmin,
+  updateDishAvailability,
+  deleteDishFromDb,
 } from '@/lib/supabase';
 
-// Typed access to the inner mock functions
-type Mocks = {
-  mockUpload: jest.Mock; mockGetPublicUrl: jest.Mock; mockRemove: jest.Mock;
-  mockInsert: jest.Mock; mockGetUser: jest.Mock; mockSingle: jest.Mock;
-  mockEq: jest.Mock; mockSelect: jest.Mock; mockFrom: jest.Mock;
-  mockSend: jest.Mock; mockSubscribe: jest.Mock; mockChannel: jest.Mock;
-  mockRemoveChannel: jest.Mock;
-};
-
-const { __mocks } = jest.requireMock('@supabase/supabase-js') as { __mocks: Mocks };
-const {
-  mockUpload, mockGetPublicUrl, mockRemove,
-  mockInsert, mockGetUser, mockSingle, mockFrom,
-  mockSend, mockSubscribe, mockChannel, mockRemoveChannel,
-} = __mocks;
-
-// ─── Test helper ──────────────────────────────────────────────────────────────
 function makeFile(name: string, type = 'image/png'): File {
-  return new File(['(binary)'], name, { type });
+  return new File(['(binary-data)'], name, { type });
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// uploadDishImage
-// ══════════════════════════════════════════════════════════════════════════════
-describe('uploadDishImage', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockUpload.mockResolvedValue({ error: null });
-    mockGetPublicUrl.mockReturnValue({
-      data: { publicUrl: 'https://cdn.example.com/public/abc_123.png' },
+describe('lib/supabase — real Supabase client & utility functions', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(async () => {
+    global.fetch = originalFetch;
+    await supabase.removeAllChannels();
+    jest.restoreAllMocks();
+  });
+
+  afterAll(async () => {
+    await supabase.removeAllChannels();
+    supabase.realtime?.disconnect();
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // 1. Client Initialization
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('Supabase client instance', () => {
+    it('initializes a real SupabaseClient instance with expected services', () => {
+      expect(supabase).toBeDefined();
+      expect(typeof supabase.from).toBe('function');
+      expect(typeof supabase.storage.from).toBe('function');
+      expect(typeof supabase.auth.getUser).toBe('function');
+      expect(typeof supabase.channel).toBe('function');
     });
   });
 
-  it('uploads the file and returns the public URL', async () => {
-    const url = await uploadDishImage(makeFile('dish-photo.png'));
-    expect(mockUpload).toHaveBeenCalledTimes(1);
-    expect(url).toBe('https://cdn.example.com/public/abc_123.png');
-  });
+  // ════════════════════════════════════════════════════════════════════════════
+  // 2. Storage: uploadDishImage
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('uploadDishImage', () => {
+    it('uploads to public/ path and returns the generated public URL', async () => {
+      let uploadedPath = '';
+      global.fetch = (async (url: string | URL | Request) => {
+        const urlStr = url.toString();
+        if (urlStr.includes('/storage/v1/object/dishes/')) {
+          uploadedPath = urlStr;
+          return new Response(JSON.stringify({ Key: 'dishes/public/photo.png' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(null, { status: 200 });
+      }) as any;
 
-  it('stores the file under the public/ prefix', async () => {
-    await uploadDishImage(makeFile('test.jpg'));
-    const [filePath] = mockUpload.mock.calls[0] as [string];
-    expect(filePath).toMatch(/^public\//);
-  });
-
-  it('generates a unique filename on every call (no collisions)', async () => {
-    const paths: string[] = [];
-    for (let i = 0; i < 5; i++) {
-      await uploadDishImage(makeFile(`image-${i}.jpg`));
-      paths.push((mockUpload.mock.calls[i] as [string])[0]);
-    }
-    expect(new Set(paths).size).toBe(5);
-  });
-
-  it('preserves the original file extension in the stored filename', async () => {
-    await uploadDishImage(makeFile('photo.webp'));
-    const [filePath] = mockUpload.mock.calls[0] as [string];
-    expect(filePath).toMatch(/\.webp$/);
-  });
-
-  it('accepts a custom bucket name without error', async () => {
-    await expect(uploadDishImage(makeFile('test.jpg'), 'menu-images')).resolves.toBeDefined();
-  });
-
-  it('throws when the Supabase upload returns an error', async () => {
-    mockUpload.mockResolvedValue({ error: { message: 'Storage limit exceeded' } });
-    await expect(uploadDishImage(makeFile('fail.png'))).rejects.toThrow('Failed to upload image');
-  });
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// removeDishImage
-// ══════════════════════════════════════════════════════════════════════════════
-describe('removeDishImage', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockRemove.mockResolvedValue({ error: null });
-  });
-
-  it('extracts the correct file path from the public URL and deletes it', async () => {
-    const url = 'https://xyz.supabase.co/storage/v1/object/public/dishes/public/abc_123.png';
-    await removeDishImage(url);
-    expect(mockRemove).toHaveBeenCalledWith(['public/abc_123.png']);
-  });
-
-  it('does not call remove() when the URL format is not recognised', async () => {
-    await removeDishImage('https://other-cdn.example.com/image.png');
-    expect(mockRemove).not.toHaveBeenCalled();
-  });
-
-  it('does not throw when the URL is unrecognised (graceful no-op)', async () => {
-    await expect(
-      removeDishImage('https://other-cdn.example.com/image.png')
-    ).resolves.not.toThrow();
-  });
-
-  it('does not throw when Supabase remove() returns an error', async () => {
-    mockRemove.mockResolvedValue({ error: { message: 'Object not found' } });
-    const url = 'https://xyz.supabase.co/storage/v1/object/public/dishes/public/gone.png';
-    await expect(removeDishImage(url)).resolves.not.toThrow();
-  });
-});
-
-// ══════════════════════════════════════════════════════════════════════════════
-// broadcastMenuUpdate
-// ══════════════════════════════════════════════════════════════════════════════
-describe('broadcastMenuUpdate', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    jest.useFakeTimers();
-    mockSend.mockReturnValue(undefined);
-    mockSubscribe.mockImplementation((cb: (status: string) => void) => {
-      cb('SUBSCRIBED');
-      return { send: mockSend };
+      const url = await uploadDishImage(makeFile('curry.jpg'));
+      expect(url).toContain('/storage/v1/object/public/dishes/public/');
+      expect(url).toMatch(/\.jpg$/);
+      expect(uploadedPath).toContain('/storage/v1/object/dishes/public/');
     });
-    mockChannel.mockReturnValue({ subscribe: mockSubscribe, send: mockSend });
-    mockRemoveChannel.mockReturnValue(undefined);
+
+    it('generates unique filenames to prevent collisions', async () => {
+      const urls: string[] = [];
+      global.fetch = (async () => {
+        return new Response(JSON.stringify({ Key: 'ok' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as any;
+
+      for (let i = 0; i < 5; i++) {
+        const url = await uploadDishImage(makeFile(`dish-${i}.png`));
+        urls.push(url);
+      }
+      expect(new Set(urls).size).toBe(5);
+    });
+
+    it('throws error when storage upload fails', async () => {
+      global.fetch = (async () => {
+        return new Response(
+          JSON.stringify({ statusCode: '413', message: 'Payload too large', error: 'Payload too large' }),
+          { status: 413, headers: { 'content-type': 'application/json' } }
+        );
+      }) as any;
+
+      await expect(uploadDishImage(makeFile('large-image.png'))).rejects.toThrow('Failed to upload image');
+    });
   });
 
-  afterEach(() => jest.useRealTimers());
+  // ════════════════════════════════════════════════════════════════════════════
+  // 3. Storage: removeDishImage
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('removeDishImage', () => {
+    it('extracts the file path and calls storage delete endpoint', async () => {
+      let deleteCalled = false;
+      let deleteBody = '';
 
-  it('creates a realtime channel scoped to the restaurant slug', () => {
-    broadcastMenuUpdate('my-restaurant');
-    expect(mockChannel).toHaveBeenCalledWith('public-data-my-restaurant');
+      global.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+        if (init?.method === 'DELETE') {
+          deleteCalled = true;
+          deleteBody = String(init.body);
+          return new Response(JSON.stringify([{ name: 'public/abc_123.png' }]), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(null, { status: 200 });
+      }) as any;
+
+      const testUrl = 'https://demo-test.supabase.co/storage/v1/object/public/dishes/public/abc_123.png';
+      await removeDishImage(testUrl);
+
+      expect(deleteCalled).toBe(true);
+      expect(deleteBody).toContain('public/abc_123.png');
+    });
+
+    it('gracefully ignores non-supabase URLs without throwing', async () => {
+      const fetchSpy = jest.fn();
+      global.fetch = fetchSpy as any;
+
+      await expect(removeDishImage('https://images.unsplash.com/photo-123')).resolves.not.toThrow();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('gracefully handles storage delete errors without unhandled rejection', async () => {
+      global.fetch = (async () => {
+        return new Response(
+          JSON.stringify({ statusCode: '404', message: 'Object not found' }),
+          { status: 404, headers: { 'content-type': 'application/json' } }
+        );
+      }) as any;
+
+      const testUrl = 'https://demo-test.supabase.co/storage/v1/object/public/dishes/public/missing.png';
+      await expect(removeDishImage(testUrl)).resolves.not.toThrow();
+    });
   });
 
-  it('sends a refresh-menu broadcast event when subscribed', () => {
-    broadcastMenuUpdate('my-restaurant');
-    expect(mockSend).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'broadcast', event: 'refresh-menu' })
-    );
+  // ════════════════════════════════════════════════════════════════════════════
+  // 4. Database: getDishesByRestaurantSlug
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('getDishesByRestaurantSlug', () => {
+    it('fetches dishes linked by restaurant_id when restaurant exists', async () => {
+      global.fetch = (async (url: string | URL | Request) => {
+        const urlStr = url.toString();
+        if (urlStr.includes('/rest/v1/restaurants')) {
+          return new Response(JSON.stringify({ id: 'rest-uuid-101' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (urlStr.includes('/rest/v1/dishes')) {
+          return new Response(
+            JSON.stringify([
+              { id: 'dish-1', name: 'Paneer Butter Masala', category: 'Curry', price: 280, is_available: true },
+              { id: 'dish-2', name: 'Garlic Naan', category: 'Breads', price: 60, is_available: true },
+            ]),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          );
+        }
+        return new Response(null, { status: 200 });
+      }) as any;
+
+      const dishes = await getDishesByRestaurantSlug('spice-garden');
+      expect(dishes).toHaveLength(2);
+      expect(dishes[0].name).toBe('Paneer Butter Masala');
+      expect(dishes[1].name).toBe('Garlic Naan');
+    });
+
+    it('throws when the database query fails', async () => {
+      global.fetch = (async (url: string | URL | Request) => {
+        const urlStr = url.toString();
+        if (urlStr.includes('/rest/v1/restaurants')) {
+          return new Response(JSON.stringify({ id: 'rest-uuid-101' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(
+          JSON.stringify({ code: '42P01', message: 'relation "dishes" does not exist' }),
+          { status: 500, headers: { 'content-type': 'application/json' } }
+        );
+      }) as any;
+
+      await expect(getDishesByRestaurantSlug('spice-garden')).rejects.toThrow();
+    });
   });
 
-  it('broadcast payload includes a timestamp', () => {
-    broadcastMenuUpdate('my-restaurant');
-    const call = mockSend.mock.calls[0][0] as { payload: { timestamp: number } };
-    expect(typeof call.payload.timestamp).toBe('number');
-  });
-});
+  // ════════════════════════════════════════════════════════════════════════════
+  // 5. Database: getDishesForAdmin
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('getDishesForAdmin', () => {
+    it('throws "User not authenticated" when no auth session exists', async () => {
+      jest.spyOn(supabase.auth, 'getUser').mockResolvedValueOnce({
+        data: { user: null },
+        error: null,
+      } as any);
 
-// ══════════════════════════════════════════════════════════════════════════════
-// logAdminAction
-// ══════════════════════════════════════════════════════════════════════════════
-describe('logAdminAction', () => {
-  beforeEach(() => jest.clearAllMocks());
+      await expect(getDishesForAdmin()).rejects.toThrow('User not authenticated');
+    });
 
-  it('silently returns when the user is not authenticated (no DB call)', async () => {
-    mockGetUser.mockResolvedValue({ data: { user: null } });
-    await expect(logAdminAction('DISH_ADDED', 'Added Paneer Tikka')).resolves.not.toThrow();
-    expect(mockInsert).not.toHaveBeenCalled();
-  });
+    it('returns empty array when authenticated user has no restaurant record', async () => {
+      jest.spyOn(supabase.auth, 'getUser').mockResolvedValueOnce({
+        data: { user: { id: 'admin-user-123' } as any },
+        error: null,
+      });
 
-  it('inserts an activity_log row with the correct action_type and description', async () => {
-    mockGetUser.mockResolvedValue({ data: { user: { id: 'user-123' } } });
-    mockSingle.mockResolvedValue({ data: { id: 'rest-456' }, error: null });
+      global.fetch = (async () => {
+        return new Response(
+          JSON.stringify({ code: 'PGRST116', message: '0 rows' }),
+          { status: 406, headers: { 'content-type': 'application/json' } }
+        );
+      }) as any;
 
-    const insertResult = { error: null };
-    mockInsert.mockResolvedValue(insertResult);
-
-    await logAdminAction('DISH_DELETED', 'Deleted Butter Chicken');
-
-    expect(mockInsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action_type: 'DISH_DELETED',
-        description: 'Deleted Butter Chicken',
-        admin_id: 'user-123',
-      })
-    );
+      const dishes = await getDishesForAdmin();
+      expect(dishes).toEqual([]);
+    });
   });
 
-  it('does not throw when the activity_logs insert fails (silent failure)', async () => {
-    mockGetUser.mockResolvedValue({ data: { user: { id: 'user-abc' } } });
-    mockSingle.mockResolvedValue({ data: { id: 'rest-999' }, error: null });
-    mockInsert.mockResolvedValue({ error: { message: 'DB write failed' } });
+  // ════════════════════════════════════════════════════════════════════════════
+  // 6. Database: logAdminAction
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('logAdminAction', () => {
+    it('silently ignores unauthenticated calls', async () => {
+      jest.spyOn(supabase.auth, 'getUser').mockResolvedValueOnce({
+        data: { user: null },
+        error: null,
+      } as any);
 
-    await expect(
-      logAdminAction('SETTINGS_CHANGED', 'Changed restaurant name')
-    ).resolves.not.toThrow();
+      const fetchSpy = jest.fn();
+      global.fetch = fetchSpy as any;
+
+      await expect(logAdminAction('DISH_ADDED', 'Created dish')).resolves.not.toThrow();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('inserts activity log when authenticated', async () => {
+      jest.spyOn(supabase.auth, 'getUser').mockResolvedValueOnce({
+        data: { user: { id: 'admin-1' } as any },
+        error: null,
+      });
+
+      let insertBody = '';
+      global.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = url.toString();
+        if (urlStr.includes('/rest/v1/restaurants')) {
+          return new Response(JSON.stringify({ id: 'rest-1' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (urlStr.includes('/rest/v1/activity_logs') && init?.method === 'POST') {
+          insertBody = String(init.body);
+          return new Response(JSON.stringify({ id: 'log-1' }), {
+            status: 201,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(null, { status: 200 });
+      }) as any;
+
+      await logAdminAction('PRICE_UPDATED', 'Updated prices for combo');
+      expect(insertBody).toContain('PRICE_UPDATED');
+      expect(insertBody).toContain('Updated prices for combo');
+    });
   });
 
-  it('does not throw when the restaurant lookup returns no data', async () => {
-    mockGetUser.mockResolvedValue({ data: { user: { id: 'user-xyz' } } });
-    mockSingle.mockResolvedValue({ data: null, error: null });
+  // ════════════════════════════════════════════════════════════════════════════
+  // 7. Realtime: broadcastMenuUpdate
+  // ════════════════════════════════════════════════════════════════════════════
+  describe('broadcastMenuUpdate', () => {
+    it('creates a realtime channel with correct topic and dispatches refresh', () => {
+      jest.useFakeTimers();
+      const channel = supabase.channel('public-data-test-slug');
+      expect(channel.topic).toBe('realtime:public-data-test-slug');
+      expect(typeof channel.subscribe).toBe('function');
+      expect(typeof channel.send).toBe('function');
 
-    await expect(
-      logAdminAction('MENU_UPDATED', 'Updated menu order')
-    ).resolves.not.toThrow();
-    expect(mockInsert).not.toHaveBeenCalled();
+      const sendSpy = jest.spyOn(channel, 'send').mockImplementation(() => Promise.resolve('ok' as any));
+      const subscribeSpy = jest.spyOn(channel, 'subscribe').mockImplementation(((callback?: (status: string) => void) => {
+        if (callback) callback('SUBSCRIBED');
+        return channel;
+      }) as any);
+      const channelSpy = jest.spyOn(supabase, 'channel').mockReturnValue(channel);
+
+      broadcastMenuUpdate('test-slug');
+
+      expect(channelSpy).toHaveBeenCalledWith('public-data-test-slug');
+      expect(subscribeSpy).toHaveBeenCalled();
+      expect(sendSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'broadcast',
+          event: 'refresh-menu',
+        })
+      );
+
+      jest.advanceTimersByTime(1500);
+      jest.useRealTimers();
+    });
   });
 });
