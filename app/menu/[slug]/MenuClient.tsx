@@ -295,7 +295,7 @@ export default function MenuClient({
         { event: 'UPDATE', schema: 'public', table: 'orders', filter: `restaurant_id=eq.${initialRestaurant.id}` },
         (payload) => {
           if (payload.new && activeOrderIds.includes(payload.new.id)) {
-            console.log("🟢 Realtime update for tracked order:", payload.new);
+            console.log(" Realtime update for tracked order:", payload.new);
             setTrackedOrders(prev => prev.map(o => o.id === payload.new.id ? payload.new : o));
             setOrderStatus(payload.new.status);
           }
@@ -306,7 +306,7 @@ export default function MenuClient({
         { event: 'DELETE', schema: 'public', table: 'orders' },
         (payload) => {
           if (payload.old && activeOrderIds.includes(payload.old.id)) {
-            console.log("🔴 Realtime delete for tracked order:", payload.old.id);
+            console.log(" Realtime delete for tracked order:", payload.old.id);
             setTrackedOrders(prev => prev.filter(o => o.id !== payload.old.id));
             setActiveOrderIds(prev => {
               const updated = prev.filter(id => id !== payload.old.id);
@@ -853,8 +853,8 @@ export default function MenuClient({
                                         setSelectedSizes(prev => ({ ...prev, [item.id]: i }));
                                       }}
                                       className={`px-2.5 py-1 text-[9px] uppercase tracking-wide font-extrabold rounded-lg transition-all ${isSelected
-                                          ? 'bg-[#EA580C] text-white shadow-[0_0_8px_rgba(234,88,12,0.4)]'
-                                          : 'bg-white/10 text-gray-300 border border-white/10 hover:bg-white/20'
+                                        ? 'bg-[#EA580C] text-white shadow-[0_0_8px_rgba(234,88,12,0.4)]'
+                                        : 'bg-white/10 text-gray-300 border border-white/10 hover:bg-white/20'
                                         }`}
                                     >
                                       {label}
@@ -1003,8 +1003,8 @@ export default function MenuClient({
                                       setSelectedSizes(prev => ({ ...prev, [item.id]: i }));
                                     }}
                                     className={`px-2.5 py-1 text-[9px] uppercase tracking-wide font-extrabold rounded-lg transition-all ${isSelected
-                                        ? 'bg-[#EA580C] text-white shadow-[0_0_8px_rgba(234,88,12,0.4)]'
-                                        : 'bg-white/10 text-gray-300 border border-white/10 hover:bg-white/20'
+                                      ? 'bg-[#EA580C] text-white shadow-[0_0_8px_rgba(234,88,12,0.4)]'
+                                      : 'bg-white/10 text-gray-300 border border-white/10 hover:bg-white/20'
                                       }`}
                                   >
                                     {label}

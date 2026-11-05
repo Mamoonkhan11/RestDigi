@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Loader2, Plus, Trash2, Link as LinkIcon, QrCode, Download, Lock } from 'lucide-react';
+import { Loader2, Plus, Trash2, QrCode, Download, Lock } from 'lucide-react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { useRestaurant } from '@/lib/RestaurantContext';
@@ -67,7 +67,7 @@ export default function TablesPage() {
     isOpen: false,
     title: '',
     message: '',
-    onConfirm: () => {}
+    onConfirm: () => { }
   });
 
   const planType = restaurant?.plan_type || 'free';
@@ -246,7 +246,7 @@ export default function TablesPage() {
       )
       .subscribe();
 
-    // ⚡ Realtime subscription for orders changes to update live table status
+    //  Realtime subscription for orders changes to update live table status
     const ordersChannel = supabase
       .channel(`orders-realtime-${restaurant.id}`)
       .on(
@@ -258,7 +258,7 @@ export default function TablesPage() {
       )
       .subscribe();
 
-    // ⚡ CLEANUP: Prevents zombie channels on unmount
+    //  CLEANUP: Prevents zombie channels on unmount
     return () => {
       supabase.removeChannel(tablesChannel);
       supabase.removeChannel(ordersChannel);
@@ -362,8 +362,6 @@ export default function TablesPage() {
   if (isRestaurantLoading || isLoading) {
     return <TableSkeleton />;
   }
-
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://vionys.com';
 
   return wrapWithLock(
     <div className="p-4 sm:p-8 max-w-6xl mx-auto min-h-screen bg-transparent font-sans text-white">
@@ -485,94 +483,67 @@ export default function TablesPage() {
           </div>
         </div>
 
-        {/* Right Side: QR Live Preview */}
+        {/* Right Column: Preview QR and Actions */}
         <div className="lg:col-span-7">
-          <div className="bg-white/[0.03] backdrop-blur-md p-6 md:p-12 rounded-[2rem] border border-white/10 shadow-lg sticky top-8 flex flex-col items-center">
-            {selectedTable ? (() => {
-              const shortId = selectedTable?.id ? selectedTable.id.substring(0, 4) : '';
-              const qrUrl = shortId
-                ? `${origin}/t/${restaurant?.slug}/${shortId}`
-                : `${origin}/menu/${restaurant?.slug}?tableId=${selectedTable?.id}`;
+          {selectedTable && restaurant ? (
+            <div className="bg-white/5 p-6 md:p-12 rounded-2xl border border-white/10 shadow-sm flex flex-col items-center">
 
-              return (
-                <>
-                  <div id="printable-qr-frame" className="bg-white p-8 rounded-xl border border-gray-200 shadow-sm inline-flex flex-col items-center mb-8 w-[320px] shrink-0 print:border-none print:shadow-none print:w-[100vw]">
-                    <div className="qr-print-frame">
-                      <div className="mb-8 text-center">
-                        <h3 className="text-xl font-bold text-[#111827] tracking-tight uppercase leading-tight">{restaurant?.name || 'Restaurant Name'}</h3>
-                        <p className="text-xs font-bold text-gray-600 mt-1 uppercase tracking-widest leading-tight">{selectedTable.table_no}</p>
-                      </div>
+              {/* 1. VISIBLE INTERACTIVE CANVAS FOR SMARTPHONES */}
+              <div id="printable-qr-frame" className="p-8 bg-white rounded-xl flex flex-col items-center w-[320px] shadow-lg border border-gray-200">
+                <h2 className="text-[#111827] font-bold text-center uppercase tracking-wide text-lg mb-1">
+                  {restaurant.name || 'Restaurant'}
+                </h2>
+                <p className="text-[#4B5563] text-xs font-bold uppercase tracking-widest mb-6">
+                  {selectedTable.table_no || 'Table'}
+                </p>
 
-                      <div className="bg-white p-2 border border-gray-100 rounded-lg mb-8 flex justify-center items-center">
-                        {/* Visible on-screen preview — SVG with logo */}
-                        <QRCodeSVG
-                          value={qrUrl}
-                          size={200}
-                          fgColor="#000000"
-                          bgColor="#FFFFFF"
-                          level="H"
-                          imageSettings={{
-                            src: "/favicon-tab.png",
-                            x: undefined,
-                            y: undefined,
-                            height: 28,
-                            width: 28,
-                            excavate: true,
-                          }}
-                        />
-                        {/* Hidden canvas used for PNG export — canvas has logo pixels baked in */}
-                        <QRCodeCanvas
-                          id="hidden-qr-canvas"
-                          value={qrUrl}
-                          size={200}
-                          fgColor="#000000"
-                          bgColor="#FFFFFF"
-                          level="H"
-                          imageSettings={{
-                            src: "/favicon-tab.png",
-                            x: undefined,
-                            y: undefined,
-                            height: 28,
-                            width: 28,
-                            excavate: true,
-                          }}
-                          style={{ display: 'none' }}
-                        />
-                      </div>
+                {/* This SVG is optimized for live interface scanning */}
+                <div className="bg-white p-2 rounded-lg border border-gray-100 shadow-inner">
+                  <QRCodeSVG
+                    value={`https://restdigi.online/menu/${restaurant.slug || restaurant.id}?tableId=${selectedTable.id}`.trim()}
+                    size={200}
+                    level="M"
+                    includeMargin={false}
+                  />
+                </div>
 
-                      <div className="text-center">
-                        <p className="text-sm font-bold text-[#111827] tracking-widest uppercase leading-tight">Contactless Dining</p>
-                        <p className="text-[10px] text-gray-500 font-bold mt-1 uppercase tracking-widest leading-tight">Scan for Menu</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="w-[320px] space-y-3 print:hidden">
-                    <a
-                      href={qrUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="w-full bg-white/5 border border-white/10 hover:bg-white/10 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 text-sm"
-                    >
-                      <LinkIcon className="w-4 h-4" /> Live Preview
-                    </a>
-                    <button
-                      onClick={handleDownloadPNG}
-                      className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-md hover:shadow-[0_0_20px_rgba(234,88,12,0.3)] flex items-center justify-center gap-2"
-                    >
-                      <Download className="w-4 h-4 shrink-0" />
-                      <span>Download PNG</span>
-                    </button>
-                  </div>
-                </>
-              );
-            })() : (
-              <div className="py-24 flex flex-col items-center text-white/20">
-                <QrCode className="w-12 h-12 text-white/10 mb-4 animate-pulse" />
-                <h3 className="font-bold text-gray-400 text-sm">No Table Selected</h3>
+                <p className="text-[#111827] font-bold text-xs mt-6 tracking-wide">
+                  CONTACTLESS DINING
+                </p>
+                <p className="text-[#6B7280] font-semibold text-[10px] mt-1 tracking-wider">
+                  SCAN FOR MENU
+                </p>
               </div>
-            )}
-          </div>
+
+              {/* 2. HIDDEN HIGH-DENSITY PRINT CANVAS FOR CRISP PNG COPIES */}
+              <div className="hidden">
+                <QRCodeCanvas
+                  id="hidden-qr-canvas"
+                  value={`https://restdigi.online/menu/${restaurant.slug || restaurant.id}?tableId=${selectedTable.id}`.trim()}
+                  size={400}
+                  level="H"
+                  includeMargin={false}
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="mt-8 flex gap-4 w-[320px]">
+                <button
+                  onClick={handleDownloadPNG}
+                  className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/20"
+                >
+                  <Download className="w-4 h-4" />
+                  Download Flyer
+                </button>
+              </div>
+
+            </div>
+          ) : (
+            <div className="bg-white/5 p-6 md:p-12 rounded-2xl border border-white/10 shadow-sm flex flex-col items-center py-24 text-white/20">
+              <QrCode className="w-12 h-12 text-white/10 mb-4 animate-pulse" />
+              <h3 className="font-bold text-gray-400 text-sm">No Table Selected</h3>
+            </div>
+          )}
         </div>
       </div>
       {confirmModal.isOpen && (
