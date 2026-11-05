@@ -500,7 +500,7 @@ export default function TablesPage() {
                 {/* This SVG is optimized for live interface scanning */}
                 <div className="bg-white p-2 rounded-lg border border-gray-100 shadow-inner">
                   <QRCodeSVG
-                    value={`https://restdigi.online/menu/${restaurant.slug || restaurant.id}?tableId=${selectedTable.id}`.trim()}
+                    value={`https://www.restdigi.online/menu/${restaurant.slug || restaurant.id}?tableId=${selectedTable.id}`.trim()}
                     size={200}
                     level="M"
                     includeMargin={false}
@@ -519,7 +519,7 @@ export default function TablesPage() {
               <div className="hidden">
                 <QRCodeCanvas
                   id="hidden-qr-canvas"
-                  value={`https://restdigi.online/menu/${restaurant.slug || restaurant.id}?tableId=${selectedTable.id}`.trim()}
+                  value={`https://www.restdigi.online/menu/${restaurant.slug || restaurant.id}?tableId=${selectedTable.id}`.trim()}
                   size={400}
                   level="H"
                   includeMargin={false}
